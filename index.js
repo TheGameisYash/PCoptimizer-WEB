@@ -159,6 +159,9 @@ async function getActivityLog(limit = 100) {
     }
 }
 
+
+
+
 // NEW: HWID Reset Requests
 async function getHwidRequests() {
     try {
@@ -1818,18 +1821,18 @@ app.use((req, res) => {
 });
 
 // --- SERVER STARTUP ---
-const PORT = CONFIG.PORT;
+const PORT = process.env.PORT || CONFIG.PORT || 3000;
 
-// app.listen(PORT, () => {
-//     console.log('\n🎉 ===== PC OPTIMIZER PRO ULTIMATE =====');
-//     console.log(`✅ Server running on http://localhost:${PORT}`);
-//     console.log(`🔥 Firebase connected to project: optimizer-ae60e`);
-//     console.log(`🛡️ Security & monitoring active`);
-//     console.log(`📊 Real-time analytics enabled`);
-//     console.log(`👤 Admin panel: http://localhost:${PORT}/admin`);
-//     console.log(`🔑 Login with username: ${CONFIG.ADMIN_USERNAME}`);
-//     console.log('🚀 All systems operational!');
-//     console.log('==========================================\n');
-// });
+app.listen(PORT, () => {
+    console.log('\n🎉 ===== PC OPTIMIZER PRO ULTIMATE =====');
+    console.log(`✅ Server running on http://localhost:${PORT}`);
+    console.log(`🔥 Firebase connected to project: optimizer-ae60e`);
+    console.log(`🛡️ Security & monitoring active`);
+    console.log(`📊 Real-time analytics enabled`);
+    console.log(`👤 Admin panel: http://localhost:${PORT}/admin`);
+    console.log(`🔑 Login with username: ${CONFIG.ADMIN_USERNAME}`);
+    console.log('🚀 All systems operational!');
+    console.log('==========================================\n');
+});
 
 module.exports = app;
