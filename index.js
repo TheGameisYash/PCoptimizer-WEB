@@ -287,55 +287,183 @@ function formatTimeAgo(date) {
 // --- ENHANCED API ENDPOINTS ---
 app.get('/api/validate', async (req, res) => {
     const { license, hwid } = req.query;
-    if (!license || !hwid) return res.send('FAILED');
     
     try {
+        // Input validation
+        if (!license || !hwid) {
+            return res.status(400).json({
+                success: false,
+                code: 'MISSING_PARAMETERS',
+                message: 'License and HWID are required',
+                data: null
+            });
+        }
+        
         await logActivity('API_VALIDATE', `License: ${license} HWID: ${hwid}`, req.ip, req.get('User-Agent'));
         
         const settings = await getSettings();
-        if (!settings.apiEnabled) return res.send('API_DISABLED');
+        if (!settings.apiEnabled) {
+            return res.status(503).json({
+                success: false,
+                code: 'API_DISABLED',
+                message: 'API is currently disabled',
+                data: null
+            });
+        }
         
         const banlist = await getBanlist();
-        if (isHWIDBanned(hwid, banlist)) return res.send('BANNED');
+        if (isHWIDBanned(hwid, banlist)) {
+            return res.status(403).json({
+                success: false,
+                code: 'BANNED',
+                message: 'Hardware ID is banned',
+                data: { hwid }
+            });
+        }
         
         const lic = await getLicense(license);
-        if (!lic) return res.send('INVALID_LICENSE');
-        if (isLicenseExpired(lic)) return res.send('EXPIRED');
+        if (!lic) {
+            return res.status(404).json({
+                success: false,
+                code: 'INVALID_LICENSE',
+                message: 'License not found',
+                data: { license }
+            });
+        }
+        
+        if (isLicenseExpired(lic)) {
+            return res.status(410).json({
+                success: false,
+                code: 'EXPIRED',
+                message: 'License has expired',
+                data: { 
+                    license,
+                    expiry: lic.expiry 
+                }
+            });
+        }
+        
         if (lic.hwid === hwid) {
             // Update last validation time
             await saveLicense(license, { ...lic, lastValidated: new Date().toISOString() });
-            return res.send('VALID');
+            return res.json({
+                success: true,
+                code: 'VALID',
+                message: 'License validation successful',
+                data: {
+                    license,
+                    hwid,
+                    expiry: lic.expiry,
+                    lastValidated: new Date().toISOString()
+                }
+            });
         }
-        return res.send('HWID_MISMATCH');
+        
+        return res.status(409).json({
+            success: false,
+            code: 'HWID_MISMATCH',
+            message: 'Hardware ID does not match',
+            data: { 
+                license,
+                provided_hwid: hwid,
+                registered_hwid: lic.hwid 
+            }
+        });
+        
     } catch (error) {
         console.error('Validation error:', error);
-        return res.send('ERROR');
+        return res.status(500).json({
+            success: false,
+            code: 'SERVER_ERROR',
+            message: 'Internal server error',
+            data: null
+        });
     }
 });
 
+
 app.get('/api/register', async (req, res) => {
     const { license, hwid } = req.query;
-    if (!license || !hwid) return res.send('FAILED');
     
     try {
+        if (!license || !hwid) {
+            return res.status(400).json({
+                success: false,
+                code: 'MISSING_PARAMETERS',
+                message: 'License and HWID are required',
+                data: null
+            });
+        }
+        
         await logActivity('API_REGISTER', `License: ${license} HWID: ${hwid}`, req.ip, req.get('User-Agent'));
         
         const settings = await getSettings();
-        if (!settings.apiEnabled) return res.send('API_DISABLED');
+        if (!settings.apiEnabled) {
+            return res.status(503).json({
+                success: false,
+                code: 'API_DISABLED',
+                message: 'API is currently disabled',
+                data: null
+            });
+        }
         
         const banlist = await getBanlist();
-        if (isHWIDBanned(hwid, banlist)) return res.send('BANNED');
+        if (isHWIDBanned(hwid, banlist)) {
+            return res.status(403).json({
+                success: false,
+                code: 'BANNED',
+                message: 'Hardware ID is banned',
+                data: { hwid }
+            });
+        }
         
         const lic = await getLicense(license);
-        if (!lic) return res.send('INVALID_LICENSE');
-        if (isLicenseExpired(lic)) return res.send('EXPIRED');
-        if (lic.hwid && lic.hwid !== hwid) return res.send('ALREADY_REGISTERED');
+        if (!lic) {
+            return res.status(404).json({
+                success: false,
+                code: 'INVALID_LICENSE',
+                message: 'License not found',
+                data: { license }
+            });
+        }
+        
+        if (isLicenseExpired(lic)) {
+            return res.status(410).json({
+                success: false,
+                code: 'EXPIRED',
+                message: 'License has expired',
+                data: { 
+                    license,
+                    expiry: lic.expiry 
+                }
+            });
+        }
+        
+        if (lic.hwid && lic.hwid !== hwid) {
+            return res.status(409).json({
+                success: false,
+                code: 'ALREADY_REGISTERED',
+                message: 'License is already registered to another device',
+                data: { 
+                    license,
+                    registered_hwid: lic.hwid 
+                }
+            });
+        }
         
         // Check if HWID is used by another license
         const allLicenses = await getLicenses();
         for (const [licKey, licData] of Object.entries(allLicenses)) {
             if (licData.hwid === hwid && licKey !== license) {
-                return res.send('HWID_IN_USE');
+                return res.status(409).json({
+                    success: false,
+                    code: 'HWID_IN_USE',
+                    message: 'Hardware ID is already registered to another license',
+                    data: { 
+                        hwid,
+                        existing_license: licKey 
+                    }
+                });
             }
         }
         
@@ -356,33 +484,85 @@ app.get('/api/register', async (req, res) => {
         };
         
         await saveLicense(license, updatedLic);
-        return res.send('SUCCESS');
+        
+        return res.status(201).json({
+            success: true,
+            code: 'SUCCESS',
+            message: 'License registered successfully',
+            data: {
+                license,
+                hwid,
+                activatedAt: updatedLic.activatedAt,
+                expiry: updatedLic.expiry
+            }
+        });
+        
     } catch (error) {
         console.error('Registration error:', error);
-        return res.send('ERROR');
+        return res.status(500).json({
+            success: false,
+            code: 'SERVER_ERROR',
+            message: 'Internal server error',
+            data: null
+        });
     }
 });
+
 
 // NEW: Enhanced License Info API
 app.get('/api/license-info', async (req, res) => {
     const { license } = req.query;
-    if (!license) return res.send('License not found.');
     
     try {
-        const lic = await getLicense(license);
-        if (!lic) return res.send('License not found.');
+        if (!license) {
+            return res.status(400).json({
+                success: false,
+                code: 'MISSING_LICENSE',
+                message: 'License parameter is required',
+                data: null
+            });
+        }
         
-        const activatedAt = lic.activatedAt ? lic.activatedAt.replace('T', ' ').substring(0, 19) : "Not activated";
-        const expiry = lic.expiry ? lic.expiry.split('T')[0] : "Never";
-        const lastValidated = lic.lastValidated ? formatTimeAgo(lic.lastValidated) : "Never";
+        const lic = await getLicense(license);
+        if (!lic) {
+            return res.status(404).json({
+                success: false,
+                code: 'LICENSE_NOT_FOUND',
+                message: 'License not found',
+                data: { license }
+            });
+        }
+        
         const status = isLicenseExpired(lic) ? "EXPIRED" : (lic.hwid ? "ACTIVE" : "INACTIVE");
         
-        res.send(`Status: ${status} | Activated: ${activatedAt} | Expires: ${expiry} | Last Seen: ${lastValidated}`);
+        return res.json({
+            success: true,
+            code: 'LICENSE_INFO_RETRIEVED',
+            message: 'License information retrieved successfully',
+            data: {
+                license,
+                status,
+                hwid: lic.hwid || null,
+                activatedAt: lic.activatedAt || null,
+                expiry: lic.expiry || null,
+                lastValidated: lic.lastValidated || null,
+                createdAt: lic.createdAt || null,
+                isExpired: isLicenseExpired(lic),
+                isActive: !!lic.hwid && !isLicenseExpired(lic)
+            }
+        });
+        
     } catch (error) {
         console.error('License info error:', error);
-        res.send('Error retrieving license information');
+        return res.status(500).json({
+            success: false,
+            code: 'SERVER_ERROR',
+            message: 'Error retrieving license information',
+            data: null
+        });
     }
 });
+
 
 // NEW: HWID Reset Request API
 app.post('/api/request-hwid-reset', async (req, res) => {
@@ -1639,7 +1819,12 @@ app.post('/admin/generate-license', requireLogin, async (req, res) => {
         
         const existingLicense = await getLicense(license);
         if (existingLicense) {
-            return res.send('<script>alert("License already exists!");window.location="/admin";</script>');
+            return res.status(409).json({
+                success: false,
+                code: 'LICENSE_EXISTS',
+                message: 'License already exists',
+                data: { license }
+            });
         }
         
         let expiry = req.body.expiry ? new Date(req.body.expiry).toISOString() : null;
@@ -1654,13 +1839,32 @@ app.post('/admin/generate-license', requireLogin, async (req, res) => {
         
         await saveLicense(license, licenseData);
         await logActivity('LICENSE_GENERATED', `License: ${license} Expiry: ${expiry || 'Never'}`, req.ip, req.get('User-Agent'));
+        
         console.log(`✅ Generated license: ${license}`);
-        res.redirect('/admin');
+        
+        return res.status(201).json({
+            success: true,
+            code: 'LICENSE_GENERATED',
+            message: 'License generated successfully',
+            data: {
+                license,
+                expiry,
+                createdAt: licenseData.createdAt,
+                createdBy: licenseData.createdBy
+            }
+        });
+        
     } catch (error) {
         console.error('Generate license error:', error);
-        res.send('<script>alert("Error generating license!");window.location="/admin";</script>');
+        return res.status(500).json({
+            success: false,
+            code: 'GENERATION_ERROR',
+            message: 'Error generating license',
+            data: null
+        });
     }
 });
+
 
 app.post('/admin/bulk-generate', requireLogin, async (req, res) => {
     try {
@@ -1700,15 +1904,49 @@ app.post('/admin/bulk-generate', requireLogin, async (req, res) => {
 app.post('/admin/delete-license', requireLogin, async (req, res) => {
     try {
         const { license } = req.body;
+        
+        if (!license) {
+            return res.status(400).json({
+                success: false,
+                code: 'MISSING_LICENSE',
+                message: 'License parameter is required',
+                data: null
+            });
+        }
+        
+        const existingLicense = await getLicense(license);
+        if (!existingLicense) {
+            return res.status(404).json({
+                success: false,
+                code: 'LICENSE_NOT_FOUND',
+                message: 'License not found',
+                data: { license }
+            });
+        }
+        
         await deleteLicense(license);
         await logActivity('LICENSE_DELETED', `License: ${license}`, req.ip, req.get('User-Agent'));
+        
         console.log(`🗑️ Deleted license: ${license}`);
-        res.redirect('/admin');
+        
+        return res.json({
+            success: true,
+            code: 'LICENSE_DELETED',
+            message: 'License deleted successfully',
+            data: { license }
+        });
+        
     } catch (error) {
         console.error('Delete license error:', error);
-        res.send('<script>alert("Error deleting license!");window.location="/admin";</script>');
+        return res.status(500).json({
+            success: false,
+            code: 'DELETION_ERROR',
+            message: 'Error deleting license',
+            data: null
+        });
     }
 });
+
 
 app.post('/admin/reset-hwid', requireLogin, async (req, res) => {
     try {
@@ -1810,6 +2048,20 @@ app.post('/admin/unban-hwid', requireLogin, async (req, res) => {
 
 // --- ERROR HANDLING ---
 app.use((req, res) => {
+    // Check if request expects JSON (API endpoints)
+    if (req.path.startsWith('/api/') || req.get('Accept')?.includes('application/json')) {
+        return res.status(404).json({
+            success: false,
+            code: 'ENDPOINT_NOT_FOUND',
+            message: 'The requested endpoint does not exist',
+            data: {
+                path: req.path,
+                method: req.method
+            }
+        });
+    }
+    
+    // Return HTML for browser requests
     res.status(404).send(`
         <div style="text-align:center;padding:100px;background:#1a1d23;color:#00aaee;font-family:sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;">
             <h1 style="font-size:4em;margin-bottom:20px;">🔍 404</h1>
@@ -1819,6 +2071,7 @@ app.use((req, res) => {
         </div>
     `);
 });
+
 
 // --- SERVER STARTUP ---
 const PORT = process.env.PORT || CONFIG.PORT || 3000;
@@ -1836,3 +2089,4 @@ app.listen(PORT, () => {
 });
 
 module.exports = app;
+
